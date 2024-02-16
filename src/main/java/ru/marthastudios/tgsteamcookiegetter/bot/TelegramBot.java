@@ -35,6 +35,7 @@ import ru.marthastudios.tgsteamcookiegetter.enums.UserRole;
 import ru.marthastudios.tgsteamcookiegetter.model.Request;
 import ru.marthastudios.tgsteamcookiegetter.model.User;
 import ru.marthastudios.tgsteamcookiegetter.model.Withdrawal;
+import ru.marthastudios.tgsteamcookiegetter.pojo.IgnoreWithdrawalBase;
 import ru.marthastudios.tgsteamcookiegetter.pojo.OperationBase;
 import ru.marthastudios.tgsteamcookiegetter.pojo.Pair;
 import ru.marthastudios.tgsteamcookiegetter.property.TelegramBotsProperty;
@@ -70,6 +71,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private final Map<Long, OperationBase> handleAcceptSendBaseSteps = new HashMap<>();
     private final Map<Long, OperationBase> handleCancelSendBaseSteps = new HashMap<>();
+    private final Map<Long, IgnoreWithdrawalBase> handleIgnoreWithdrawalBaseSteps = new HashMap<>();
 
     private final Map<Long, Pair<Integer, Long>> addBalanceSteps = new HashMap<>();
     private final Map<Long, Pair<Integer, Long>> removeBalanceSteps = new HashMap<>();
@@ -477,6 +479,19 @@ public class TelegramBot extends TelegramLongPollingBot {
                     if (stepAmountPair.getFirstValue().equals(1)) {
                         double amount = Double.parseDouble(text);
 
+                        if (amount < 1) {
+                            SendMessage sendMessage = SendMessage.builder()
+                                    .text("❌ Минимальная сумма для вывода - <b>1 ₽</b>. Укажите сумму больше")
+                                    .chatId(chatId)
+                                    .replyMarkup(backToProfileKeyboardMarkup)
+                                    .parseMode("html")
+                                    .build();
+
+                            sendMessage(sendMessage);
+
+                            return;
+                        }
+
                         if (userRepository.findBalanceByTelegramUserId(userId) < amount) {
                             SendMessage sendMessage = SendMessage.builder()
                                     .text("❌ У вас <b>не хватает</b> баланса для вывода. Укажите сумму меньше")
@@ -516,7 +531,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
                         userRepository.updateBalanceByTelegramUserId(userRepository.findBalanceByTelegramUserId(userId) - amount,
                                 userId);
-                        long withdrawalId = withdrawalRepository.save(Withdrawal.builder().userId(currentUser.getId()).build()).getId();
+                        long withdrawalId = withdrawalRepository.save(Withdrawal.builder().userId(currentUser.getId()).amount(amount).build()).getId();
 
                         SendMessage sendMessage = SendMessage.builder()
                                 .text("✅ <b>Заявка на вывод успешно опубликована!</b>\n\n"
@@ -588,6 +603,39 @@ public class TelegramBot extends TelegramLongPollingBot {
                     return;
                 }
 
+                if (handleIgnoreWithdrawalBaseSteps.get(userId) != null) {
+                    IgnoreWithdrawalBase ignoreWithdrawalBase = handleIgnoreWithdrawalBaseSteps.get(userId);
+
+                    userRepository.updateBalanceByTelegramUserId(userRepository.findBalanceByTelegramUserId(ignoreWithdrawalBase.getUserChatId()) + withdrawalRepository.findById(ignoreWithdrawalBase.getWithdrawalId()).orElse(null).getAmount(),
+                            userId);
+
+                    withdrawalRepository.deleteById(ignoreWithdrawalBase.getWithdrawalId());
+
+                    handleIgnoreWithdrawalBaseSteps.remove(userId);
+
+                    SendMessage sendMessage = SendMessage.builder()
+                            .text("❌ <b>Ваша недавняя заявка на вывод была отклонена, по причине:</b> " + text)
+                            .chatId(ignoreWithdrawalBase.getUserChatId())
+                            .parseMode("html")
+                            .build();
+
+                    sendMessage(sendMessage);
+
+                    DeleteMessage deleteFirstMessage = DeleteMessage.builder()
+                            .chatId(chatId)
+                            .messageId(ignoreWithdrawalBase.getFirstMessageId())
+                            .build();
+
+                    DeleteMessage deleteSecondMessage = DeleteMessage.builder()
+                            .chatId(chatId)
+                            .messageId(ignoreWithdrawalBase.getSecondMessageId())
+                            .build();
+
+                    sendDeleteMessage(deleteFirstMessage);
+                    sendDeleteMessage(deleteSecondMessage);
+                    return;
+                }
+
                 sendMessage(SendMessage.builder().text("\uD83D\uDD04 Такой команды не существует. <b>Попробуйте еще раз!</b>")
                         .chatId(chatId).parseMode("html").replyMarkup(getDefaultReplyKeyboardMarkup(currentUser)).build());
             } else if (update.hasCallbackQuery()) {
@@ -633,6 +681,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                     case BackCallback.BACK_TO_FALL_FROM_HANDLE_SEND_BASE_CALLBACK_DATA -> {
                         handleAcceptSendBaseSteps.remove(userId);
                         handleCancelSendBaseSteps.remove(userId);
+                        handleIgnoreWithdrawalBaseSteps.remove(userId);
 
                         DeleteMessage deleteMessage = DeleteMessage.builder()
                                 .chatId(chatId)
@@ -829,22 +878,70 @@ public class TelegramBot extends TelegramLongPollingBot {
                     long withdrawalId = Long.parseLong(callBackDataSplit[4]);
                     long userChatId = Long.parseLong(callBackDataSplit[5]);
 
-                    withdrawalRepository.deleteById(withdrawalId);
+                    Integer secondMessageId = null;
+
+                    InlineKeyboardMarkup backToFallFromHandleSendBaseKeyboardMarkup = new InlineKeyboardMarkup();
+
+                    InlineKeyboardButton backToFallFromHandleSendBaseButton = InlineKeyboardButton.builder()
+                            .callbackData(BackCallback.BACK_TO_FALL_FROM_HANDLE_SEND_BASE_CALLBACK_DATA)
+                            .text("\uD83D\uDEAB Отменить")
+                            .build();
+
+                    List<InlineKeyboardButton> keyboardButtonsRow1 = new ArrayList<>();
+
+                    keyboardButtonsRow1.add(backToFallFromHandleSendBaseButton);
+
+                    List<List<InlineKeyboardButton>> rowList = new ArrayList<>();
+
+                    rowList.add(keyboardButtonsRow1);
+
+                    backToFallFromHandleSendBaseKeyboardMarkup.setKeyboard(rowList);
 
                     SendMessage sendMessage = SendMessage.builder()
-                            .text("❌ <b>Ваша недавняя заявка на вывод была отклонена</b>")
-                            .chatId(userChatId)
+                            .text("❌ <b>Укажите причину</b>, по которой вы отклонили вывод пользователя")
+                            .chatId(chatId)
+                            .replyMarkup(backToFallFromHandleSendBaseKeyboardMarkup)
                             .parseMode("html")
                             .build();
 
-                    sendMessage(sendMessage);
+                    try {
+                        secondMessageId = execute(sendMessage).getMessageId();
+                    } catch (TelegramApiException e) {
+                        log.warn(e.getMessage());
+                    }
 
-                    DeleteMessage deleteMessage = DeleteMessage.builder()
-                            .chatId(chatId)
-                            .messageId(messageId)
+                    handleIgnoreWithdrawalBaseSteps.put(userId, IgnoreWithdrawalBase.builder()
+                                    .userChatId(userChatId)
+                                    .firstMessageId(messageId)
+                                    .withdrawalId(withdrawalId)
+                                    .secondMessageId(secondMessageId)
+                            .build());
+
+                    AnswerCallbackQuery answerCallbackQuery = AnswerCallbackQuery.builder()
+                            .callbackQueryId(update.getCallbackQuery().getId())
                             .build();
 
-                    sendDeleteMessage(deleteMessage);
+                    sendAnswerCallbackQuery(answerCallbackQuery);
+
+//                    userRepository.updateBalanceByTelegramUserId(userRepository.findBalanceByTelegramUserId(userId) + withdrawalRepository.findById(withdrawalId).orElse(null).getAmount(),
+//                            userId);
+//
+//                    withdrawalRepository.deleteById(withdrawalId);
+//
+//                    SendMessage sendMessage = SendMessage.builder()
+//                            .text("❌ <b>Ваша недавняя заявка на вывод была отклонена</b>")
+//                            .chatId(userChatId)
+//                            .parseMode("html")
+//                            .build();
+//
+//                    sendMessage(sendMessage);
+//
+//                    DeleteMessage deleteMessage = DeleteMessage.builder()
+//                            .chatId(chatId)
+//                            .messageId(messageId)
+//                            .build();
+//
+//                    sendDeleteMessage(deleteMessage);
 
                     return;
                 }

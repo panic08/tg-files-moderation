@@ -12,6 +12,8 @@ import org.springframework.data.relational.core.mapping.Table;
 public class Withdrawal {
     @Id
     private Long id;
+    @Column("amount")
+    private Double amount;
     @Column("user_id")
     private Long userId;
 }
