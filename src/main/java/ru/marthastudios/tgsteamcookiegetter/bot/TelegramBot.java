@@ -559,12 +559,12 @@ public class TelegramBot extends TelegramLongPollingBot {
                             InlineKeyboardMarkup inlineKeyboardMarkup = new InlineKeyboardMarkup();
 
                             InlineKeyboardButton acceptButton = InlineKeyboardButton.builder()
-                                    .callbackData(AdminCallback.ACCEPT_WITHDRAWAL_CALLBACK_DATA + " " + withdrawalId + " " + chatId)
+                                    .callbackData(AdminCallback.ACCEPT_WITHDRAWAL_CALLBACK_DATA + " " + withdrawalId + " " + userId)
                                     .text("✅ Оплачено (одобрить)")
                                     .build();
 
                             InlineKeyboardButton ignoreButton = InlineKeyboardButton.builder()
-                                    .callbackData(AdminCallback.IGNORE_WITHDRAWAL_CALLBACK_DATA + " " + withdrawalId + " " + chatId)
+                                    .callbackData(AdminCallback.IGNORE_WITHDRAWAL_CALLBACK_DATA + " " + withdrawalId + " " + userId)
                                     .text("❌ Отклонить")
                                     .build();
 
@@ -607,7 +607,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                     IgnoreWithdrawalBase ignoreWithdrawalBase = handleIgnoreWithdrawalBaseSteps.get(userId);
 
                     userRepository.updateBalanceByTelegramUserId(userRepository.findBalanceByTelegramUserId(ignoreWithdrawalBase.getUserChatId()) + withdrawalRepository.findById(ignoreWithdrawalBase.getWithdrawalId()).orElse(null).getAmount(),
-                            userId);
+                            ignoreWithdrawalBase.getUserChatId());
 
                     withdrawalRepository.deleteById(ignoreWithdrawalBase.getWithdrawalId());
 
@@ -731,7 +731,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 if (callbackData.contains(AdminCallback.ACCEPT_BASE_CALLBACK_DATA)) {
                     String[] callbackDataSplit = callbackData.split(" ");
 
-                    int userMessageId = Integer.parseInt(callbackDataSplit[4]);
+                    long userMessageId = Long.parseLong(callbackDataSplit[4]);
                     long requestId = Long.parseLong(callbackDataSplit[5]);
 
                     AnswerCallbackQuery answerCallbackQuery = AnswerCallbackQuery.builder()
@@ -786,7 +786,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 if (callbackData.contains(AdminCallback.CANCEL_BASE_CALLBACK_DATA)) {
                     String[] callbackDataSplit = callbackData.split(" ");
 
-                    int userMessageId = Integer.parseInt(callbackDataSplit[4]);
+                    long userMessageId = Long.parseLong(callbackDataSplit[4]);
                     long requestId = Long.parseLong(callbackDataSplit[5]);
 
                     AnswerCallbackQuery answerCallbackQuery = AnswerCallbackQuery.builder()
@@ -1053,7 +1053,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                             .build();
 
                     InlineKeyboardButton cancelButton = InlineKeyboardButton.builder()
-                            .callbackData(AdminCallback.CANCEL_BASE_CALLBACK_DATA+ " " + userId + " " + finalRequest.getId())
+                            .callbackData(AdminCallback.CANCEL_BASE_CALLBACK_DATA + " " + userId + " " + finalRequest.getId())
                             .text("❌ Отклонить запрос (указать причину)")
                             .build();
 
